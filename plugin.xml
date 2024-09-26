@@ -104,7 +104,7 @@
 
     <!-- Google frameworks -->
     <preference name="GOOGLE_SIGN_IN_VERSION" default="~> 6.2.3"/>
-    <preference name="GOOGLE_UTILITIES_VERSION" default="~> 7.4"/>
+    <preference name="GOOGLE_UTILITIES_VERSION" default="~> 8.0"/>
     <podspec>
       <config>
         <source url="https://cdn.cocoapods.org/"/>
