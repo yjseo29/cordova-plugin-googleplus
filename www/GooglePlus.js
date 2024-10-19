@@ -10,7 +10,11 @@ GooglePlus.prototype.login = function (options, successCallback, errorCallback) 
 };
 
 GooglePlus.prototype.trySilentLogin = function (options, successCallback, errorCallback) {
-  cordova.exec(successCallback, errorCallback, "GooglePlus", "trySilentLogin", [options]);
+  if(device.platform.toLowerCase() === "ios"){
+    successCallback("For Android only");
+  }else{
+    cordova.exec(successCallback, errorCallback, "GooglePlus", "trySilentLogin", [options]);
+  }
 };
 
 GooglePlus.prototype.logout = function (successCallback, errorCallback) {
