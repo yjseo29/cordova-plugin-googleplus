@@ -64,10 +64,15 @@
 
     <header-file src="src/ios/GooglePlus.h"/>
     <source-file src="src/ios/GooglePlus.m"/>
-
+          
     <preference name="REVERSED_CLIENT_ID" />
+    <preference name="CLIENT_ID" />
 
     <config-file target="*-Info.plist" parent="CFBundleURLTypes">
+      <string>$CLIENT_ID</string>
+    </config-file>
+
+    <config-file target="*-Info.plist" parent="GIDClientID">
       <array>
         <dict>
             <key>CFBundleTypeRole</key>
@@ -81,6 +86,7 @@
         </dict>
       </array>
     </config-file>
+          
 
     <config-file parent="keychain-access-groups" target="*/Entitlements-Debug.plist">
       <array>
