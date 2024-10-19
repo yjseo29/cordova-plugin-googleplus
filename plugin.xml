@@ -68,11 +68,11 @@
     <preference name="REVERSED_CLIENT_ID" />
     <preference name="CLIENT_ID" />
 
-    <config-file target="*-Info.plist" parent="CFBundleURLTypes">
+    <config-file target="*-Info.plist" parent="GIDClientID">
       <string>$CLIENT_ID</string>
     </config-file>
 
-    <config-file target="*-Info.plist" parent="GIDClientID">
+    <config-file target="*-Info.plist" parent="CFBundleURLTypes">
       <array>
         <dict>
             <key>CFBundleTypeRole</key>
