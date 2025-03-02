@@ -42,13 +42,19 @@
         return;
     }
 
-    NSString *clientId = [self reverseUrlScheme:reversedClientId];
+    // NSString *clientId = [self reverseUrlScheme:reversedClientId];
 
     // GIDConfiguration *config = [[GIDConfiguration alloc] initWithClientID:clientId];
 
     GIDSignIn *signIn = GIDSignIn.sharedInstance;
+    NSDictionary* options = command.arguments[0];
+    NSString* scopesString = options[@"scopes"];
+    NSArray* scopes;
+    if (scopesString != nil) {
+        scopes = [scopesString componentsSeparatedByString:@" "];
+    }
 
-    [signIn signInWithPresentingViewController:self.viewController completion:^(GIDSignInResult * _Nullable signInResult, NSError * _Nullable error) {
+    [signIn signInWithPresentingViewController:self.viewController hint:nil additionalScopes:scopes completion:^(GIDSignInResult * _Nullable signInResult, NSError * _Nullable error) {
           if (error) {
               NSDictionary *errorDetails = @{@"status": @"error", @"message": error.localizedDescription};
               CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[self toJSONString:errorDetails]];
