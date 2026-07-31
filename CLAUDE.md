@@ -73,7 +73,39 @@ UTF-8 을 ANSI 로 읽고 써서 **한글 주석이 깨진다.** 파일 수정�
 
 ## 2. 지금 상태 (2026-08 기준)
 
-### 최근 커밋 `053a797` 에서 고친 것
+### v10.0.0 — Android 인증/인가 분리 (AuthorizationClient 전환)
+
+`GooglePlus.java` 를 전면 재작성했다. 구조는 소스 상단 클래스 주석에 있다. 요점:
+
+- **인증과 인가를 분리했다.** 사인인 GSO 에는 스코프를 넣지 않고(신원만),
+  스코프+accessToken 은 `Identity.getAuthorizationClient().authorize()` 가 맡는다.
+  스코프 동의가 필요하면 **전용 동의 화면**(PendingIntent 해소)이 뜬다 —
+  로그인 화면에 딸린 미체크 체크박스가 아니라.
+- **`login` 이 silent-first 다.** 세션이 살아 있으면 계정 선택 화면 없이 토큰만 재발급된다
+  → 앱의 401 재로그인 경로가 조용해진다. 계정을 바꾸려면 로그아웃을 먼저 해야 한다(의도된 UX).
+- **`trySilentLogin` 의 의미가 바뀌었다**: 인증(사인인)이 조용히 되면 **성공**이다.
+  스코프가 미승인이면 accessToken 없이(신원 + `grantedScopes`) 성공으로 돌아온다.
+  ⚠️ 이걸 에러로 바꾸지 말 것 — 소비처(googleDriveLogout/Disconnect)가 성공을 게이트로
+  logout/disconnect 를 부르는데, 여기서 막으면 revoke 에 도달하지 못해 403 루프가 되살아난다.
+- **`logout`/`disconnect` 의 사전 조건("Please use login ... before")이 사라졌다.**
+  GoogleSignInClient 를 그 자리에서 만든다. 앱의 trySilentLogin 선행 호출은 무해한 하위 호환.
+- **`GoogleApiClient` / `Auth.GoogleSignInApi` / `blockingConnect` / AsyncTask 전부 제거.**
+  AccountManager.getAuthToken + tokeninfo HTTP 검증 경로도 통째로 사라졌다
+  (AuthorizationResult 가 accessToken 을 직접 준다).
+- **결과 계약 변화**: `grantedScopes` 추가(iOS 와 대칭), **`expires`/`expires_in` 제거**
+  (tokeninfo 검증의 부산물이었는데 AuthorizationClient 엔 만료 API 가 없다.
+  유일한 소비자는 accessToken/email 만 읽으므로 무해 — §3).
+- **에러 계약 유지**: 상태 코드 int 그대로(12501=취소 등). 인가 동의 화면을 닫으면
+  12501 을 돌려줘 앱의 기존 취소 처리("You don't have permission")를 재사용한다.
+- 프로세스 재생성 방어: 런처 결과가 재전달될 때 `savedCallbackContext`/`pendingAccount` 가
+  null 이면 NPE 대신 버린다.
+
+**검증**: 실제 앱 프로젝트(gradle `:app:compileDebugJavaWithJavac`, play-services-auth 21.6.0
+classpath)로 **javac 통과 확인**. 실기기 동작은 미검증 — §4-A 의 시나리오로 확인할 것.
+남은 deprecation 노트: `GET_SIGNATURES`(지문 조회, 기존부터), `GoogleSignIn` 계열 자체의
+deprecated 표시(다음 단계인 Credential Manager 권고 — §5).
+
+### 커밋 `053a797` 에서 고친 것
 
 **iOS**
 - `grantedScopes` 검증 추가. 부족하면 `addScopes:` 로 추가 동의 요청(증분 인가), 그래도 없으면
@@ -124,9 +156,12 @@ UTF-8 을 ANSI 로 읽고 써서 **한글 주석이 깨진다.** 파일 수정�
 |---|---|---|---|
 | `accessToken` `email` `idToken` `userId` | ✅ | ✅ | |
 | `displayName` `givenName` `familyName` `imageUrl` | ✅ | ✅ | |
-| `expires` `expires_in` | ✅ | ✅ | `053a797` 에서 iOS 추가 |
-| `grantedScopes` | ❌ | ✅ | Android 미구현(§4-B) |
+| `grantedScopes` | ✅ | ✅ | v10.0.0 에서 Android 추가 |
+| `expires` `expires_in` | ❌ | ✅ | **v10.0.0 에서 Android 제거** — AuthorizationClient 에 만료 API 가 없다. 소비자는 accessToken/email 만 읽어 무해 |
 | `serverAuthCode` | ✅ | ❌ | iOS 는 `webClientId`/`offline` 옵션 자체를 안 읽는다 |
+
+⚠️ Android `trySilentLogin` 은 스코프 미승인 시 `accessToken` 이 **null** 인 성공을 돌려준다(§2).
+   승인 여부는 `grantedScopes` 로 판단할 것.
 
 ⚠️ **에러는 반대로 JSON "문자열" 이다.** `messageAsString:[self toJSONString:...]`.
 `util_backup.js` 가 `error({message: msg})` 로 통째로 넘기고 있으므로 형식을 바꾸면 앱이 깨진다.
@@ -200,18 +235,20 @@ GIDProfileData.imageURLWithDimension:
 
 ## 5. Android 쪽 남은 일 (참고 — 맥 작업 아님)
 
-- **전면적으로 deprecated 된 API 를 쓴다**: `GoogleApiClient`, `Auth.GoogleSignInApi.getSignInIntent()`,
-  `.silentSignIn()`. `play-services-auth` 22.x 에서 제거되면 즉시 깨진다
-- `trySilentLogin` 이 `mGoogleApiClient.blockingConnect()` 를 부른다.
-  Cordova 의 WebCore 스레드라 UI 는 안 막히지만 브릿지 스레드를 막는다
-- **`grantedScopes` 검증이 없다**(§1-3). iOS 만 구현돼 있다
-- 설치된 `play-services-auth 21.6.0` 에 더 나은 API 가 이미 들어있다(확인함):
-  ```
-  GoogleSignIn.hasPermissions(account, Scope...)
-  GoogleSignIn.requestPermissions(Activity, requestCode, account, Scope...)
-  Identity.getAuthorizationClient(activity).authorize(AuthorizationRequest)
-  ```
-  `AuthorizationClient` 로 인증과 인가를 분리하면 전체 재로그인 없이 부족한 스코프만 다시 요청할 수 있다
+v10.0.0 에서 대부분 끝났다(§2). `GoogleApiClient`/`blockingConnect` 제거, `grantedScopes` 검증,
+`AuthorizationClient` 분리 완료. 남은 것:
+
+- **인증을 Credential Manager 로 옮기기** — `GoogleSignInClient` 도 구글이 deprecated 로 표시하고
+  Credential Manager(`androidx.credentials` + `googleid`)를 권고한다. 다만 인가(AuthorizationClient)는
+  그대로 유지되는 구조라, 옮길 때 바뀌는 건 1 단계(인증)뿐이다. 새 의존성 두 개가 필요해 별도 작업.
+- `getSigningCertificateFingerprint` 가 `GET_SIGNATURES`(API 28 deprecated)를 쓴다.
+  앱이 안 쓰는 액션이라 급하지 않다.
+- **실기기 검증** — javac 만 통과한 상태다. 확인 시나리오:
+  1. 로그인 → Drive 스코프 **전용 동의 화면**이 뜨는지 (로그인 화면 체크박스가 아니라)
+  2. 동의 거부 → 12501 에러("You don't have permission") → 재시도 → 동의 화면이 다시 뜨는지
+  3. 이미 승인된 계정으로 재로그인(토큰 만료 401 시나리오) → **화면 없이** 조용히 완료되는지
+  4. 로그아웃 → 로그인 → 계정 선택 화면이 뜨는지 (계정 전환 경로)
+  5. 백업/복구 왕복
 
 ---
 
@@ -245,3 +282,7 @@ cordova plugin add <이 플러그인 경로> --variable CLIENT_ID=... --variable
 | cordova-android 6.x 에서 컴파일 실패 | 코드가 androidx `ActivityResultLauncher` 사용. `engines` 하한 10 → §2 |
 | `trySilentLogin` 에서 `device is not defined` | 예전 `device.platform` 의존. `cordova.platformId` 로 교체됨 → §2 |
 | 로그인 창이 안 뜨거나 콜백이 안 옴 (iOS) | `handleURL:` 변경 회귀 의심 → §4-A |
+| (Android) 로그인해도 계정 선택 화면이 안 뜬다 | 버그 아님 — v10 의 silent-first. 계정 전환은 로그아웃 먼저 → §2 |
+| (Android) `trySilentLogin` 성공인데 `accessToken` 이 null | 버그 아님 — 스코프 미승인 상태의 신원-만 성공. `grantedScopes` 로 판단 → §2, §3 |
+| (Android) 결과에 `expires` 가 없다 | v10 에서 제거됨(tokeninfo 검증 경로 삭제) → §3 |
+| (Android) 앱 재설치/업데이트 후 옛 코드가 도는 듯 | `platforms/` 의 사본과 `plugins/` fetch 캐시가 갱신 안 됨 — 플러그인 remove/add 재설치 필요 → §6 |
