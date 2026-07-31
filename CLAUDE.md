@@ -56,13 +56,21 @@ Google 로그인 Cordova 플러그인. **실사용 목적은 하나 — daily-da
 
 할 수 있는 건 두 가지다: ①로그인 전에 설명 화면을 띄워 체크를 유도 ②거부 시 복구 경로 제공(§1-1).
 
-📌 **v10 분리 후 실측**: `drive.appdata` 는 구글 공식 분류로 **non-sensitive** 스코프라
-(Drive API 문서의 스코프 표 — 앱 자신의 숨김 폴더만 접근), 전용 인가 흐름에서는 구글이
-**동의 UI 자체를 생략하고 자동 승인**하는 것이 관찰됐다(Drive 연결해제 + 앱데이터 삭제 후
-재로그인 → 계정 선택만 뜨고 hasResolution=false 로 즉시 토큰 발급 → 백업 정상).
-동의 화면을 띄울지는 구글 서버가 결정한다 — hasResolution 이 false 면 우리가 띄울 방법도,
-띄울 이유도 없다. 예전 GSO 통합 흐름의 미체크 체크박스는 그 UI 가 추가 스코프를 일괄
-선택 항목으로 나열하는 정책이었을 뿐이다. 분리가 곧 해법이었던 셈.
+📌 **v10 분리 후 실측 — 근거의 경계를 섞지 말 것**:
+- **문서로 확인된 사실 ①**: `drive.appdata` 는 구글 공식 분류로 **non-sensitive** 다
+  (Drive API 문서의 스코프 표 — 앱 자신의 숨김 폴더만 접근).
+- **문서로 확인된 사실 ②**: `hasResolution() == false` 의 의미는 "이전에 승인된 접근"
+  이라는 것뿐이다(Android 인가 가이드). **"non-sensitive 면 동의 UI 를 건너뛴다" 는
+  문서 어디에도 없다.**
+- **실측(문서에 없는 동작)**: Drive 연결해제 + 앱데이터 삭제 후 재로그인 → 계정 선택만
+  뜨고 hasResolution=false 로 즉시 토큰 발급, 백업 정상. 즉 revoke 뒤에도 동의 화면 없이
+  재승인됐다. 과거 승인 이력 기반의 무UI 재부여로 보이지만 **문서화되지 않은 서버 정책**이다
+  → "항상 안 뜬다" 를 가정하는 코드를 쓰지 말 것. hasResolution 양쪽 분기가 모두
+  구현돼 있는 것이 진짜 보증이다.
+- 한 번도 승인한 적 없는 새 계정에서 동의 화면이 뜨는지는 **미확인**.
+
+예전 GSO 통합 흐름의 미체크 체크박스는 그 UI 가 추가 스코프를 일괄 선택 항목으로
+나열하는 정책이었을 뿐이다. 분리가 곧 해법이었던 셈.
 
 ### 1-3. 스코프는 "요청" 이지 "승인" 이 아니다
 
@@ -244,6 +252,25 @@ GIDProfileData.imageURLWithDimension:
 → 플러그인 재설치 → `pod install` → 빌드 → §4-A 의 4 개 시나리오 재확인.
 
 ⚠️ `GOOGLE_UTILITIES_VERSION` 은 `~> 8.0` 그대로 둘 것. 9.2.0 도 `GoogleUtilities 8.x` 계열과 맞는다.
+
+### B-2. 🟡 iOS 를 Android v10 구조로 맞추기 (B 와 같이 하면 효율적)
+
+Android v10 이 인증/인가를 분리해 미체크 체크박스 문제를 구조적으로 없앴고(§1-2),
+외부 revoke 후에도 동의 화면 없이 복구되는 것까지 실기기로 확인됐다.
+iOS 의 현재 구현(053a797)은 **절반만 분리된 상태**다 — `signIn` 의 `additionalScopes:` 로
+스코프를 끼워 넣는 통합 흐름이고, 부족할 때만 `addScopes:` 를 태운다.
+
+| Android v10 | iOS 대응 (할 일) |
+|---|---|
+| 사인인 GSO 에 스코프 없음 (신원만) | `signIn...additionalScopes:` 에 **nil** — 스코프를 끼워 넣지 않기 |
+| `AuthorizationClient.authorize()` | `user.addScopes:` 가 인가 전용 흐름 — 스코프는 전부 여기서 |
+| silentSignIn 실패 시에만 인터랙티브 | `hasPreviousSignIn` → `restorePreviousSignInWithCompletion:` + `refreshTokensIfNeededWithCompletion:` — 세션이 없을 때만 signIn UI |
+| `grantedScopes` 검증 | ✅ 이미 구현됨 (053a797) |
+| `clearToken(staleAccessToken)` | **대응 API 없음** — login 옵션의 `staleAccessToken` 은 iOS 에서 무시된다. `refreshTokensIfNeeded` 가 외부 revoke 를 반영하는지 확인 필요 |
+
+⚠️ Android 에서 실제로 겪은 두 시나리오를 iOS 에서도 반드시 테스트할 것:
+① 외부(계정 설정/Drive)에서 권한 해제 후 재로그인이 죽은 토큰에 갇히지 않는지 (§2 v10.1.0)
+② 토큰 만료 후 재로그인이 UI 없이 조용히 되는지 (silent-first)
 
 ### C. 🟢 3순위 — 남은 비대칭/미구현
 
