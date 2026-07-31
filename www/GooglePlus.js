@@ -9,10 +9,19 @@ GooglePlus.prototype.login = function (options, successCallback, errorCallback) 
   cordova.exec(successCallback, errorCallback, "GooglePlus", "login", [options]);
 };
 
+/**
+ * trySilentLogin 은 안드로이드 전용이다. iOS 네이티브에는 해당 액션 자체가 없다.
+ *
+ * ⚠️ 예전에는 device.platform 으로 분기했는데 두 가지 문제가 있었다.
+ *    1. cordova-plugin-device 에 의존하는데 plugin.xml 에 dependency 선언이 없었다.
+ *       그 플러그인이 없는 프로젝트에서는 ReferenceError 가 난다.
+ *    2. device 전역은 deviceready 이후에만 정의된다. 그 전에 부르면 역시 ReferenceError.
+ *    cordova.platformId 는 cordova.js 가 직접 제공하므로 둘 다 해당되지 않는다.
+ */
 GooglePlus.prototype.trySilentLogin = function (options, successCallback, errorCallback) {
-  if(device.platform.toLowerCase() === "ios"){
+  if (cordova.platformId === 'ios') {
     successCallback("For Android only");
-  }else{
+  } else {
     cordova.exec(successCallback, errorCallback, "GooglePlus", "trySilentLogin", [options]);
   }
 };

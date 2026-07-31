@@ -14,13 +14,17 @@
 
   <keywords>Google, Google SignIn, GoogleSignIn, Google Login, Login, OAuth, Identity, Authentication</keywords>
 
-  <repo>https://github.com/EddyVerbruggen/cordova-plugin-googleplus.git</repo>
+  <repo>https://github.com/yjseo29/cordova-plugin-googleplus.git</repo>
 
-  <issue>https://github.com/EddyVerbruggen/cordova-plugin-googleplus/issues</issue>
+  <issue>https://github.com/yjseo29/cordova-plugin-googleplus/issues</issue>
 
+  <!-- ⚠️ cordova-android 하한이 6.3.0 이었는데 실제 코드와 맞지 않았다.
+       src/android/GooglePlus.java 가 androidx.activity 의 ActivityResultLauncher /
+       registerForActivityResult 를 쓰므로 AndroidX + cordova-android 10 이상이어야 한다.
+       6.x 에 설치하면 설치는 되고 컴파일에서 깨진다. -->
   <engines>
-    <engine name="cordova" version=">=7.1.0"/>
-    <engine name="cordova-android" version=">=6.3.0"/>
+    <engine name="cordova" version=">=9.0.0"/>
+    <engine name="cordova-android" version=">=10.0.0"/>
   </engines>
 
   <js-module src="www/GooglePlus.js" name="GooglePlus">
@@ -30,10 +34,10 @@
   <!-- android -->
   <platform name="android">
 
-    <preference name="PLAY_SERVICES_AUTH_VERSION" default="21.2.0"/>
-    <preference name="PLAY_SERVICES_IDENTITY_VERSION" default="18.1.0"/>
+    <!-- ⚠️ play-services-identity 는 제거했다. 선언만 있고 GooglePlus.java 의 import 는 0 개였다.
+         (구형 Address API 용이라 Google Sign-In 과 무관하다) -->
+    <preference name="PLAY_SERVICES_AUTH_VERSION" default="21.6.0"/>
     <framework src="com.google.android.gms:play-services-auth:$PLAY_SERVICES_AUTH_VERSION" />
-    <framework src="com.google.android.gms:play-services-identity:$PLAY_SERVICES_IDENTITY_VERSION" />
 
     <config-file target="res/xml/config.xml" parent="/*">
       <feature name="GooglePlus">
@@ -43,10 +47,12 @@
       <access origin="https://accounts.google.com/*" />
     </config-file>
 
-    <config-file target="AndroidManifest.xml" parent="/manifest">
-      <uses-permission android:name="android.permission.GET_ACCOUNTS" />
-      <uses-permission android:name="android.permission.USE_CREDENTIALS" />
-    </config-file>
+    <!-- ⚠️ GET_ACCOUNTS / USE_CREDENTIALS 는 제거했다.
+         AccountManager 로 계정을 직접 읽던 시절의 잔재이고, 지금 Google Sign-In 은
+         Google Play services 를 거치므로 둘 다 필요 없다.
+         USE_CREDENTIALS 는 API 23 에서 플랫폼에서 아예 삭제된 권한이고,
+         GET_ACCOUNTS 는 위험 권한이라 남겨두면 런타임 권한 요청 대상이 되고
+         Play Console 권한 설문에도 걸린다. -->
 
     <source-file src="src/android/GooglePlus.java" target-dir="src/nl/xservices/plugins"/>
   </platform>
@@ -100,13 +106,15 @@
     </config-file>
 
     <!-- System frameworks -->
-    <framework src="AddressBook.framework" weak="true" />
+    <!-- ⚠️ AddressBook.framework 와 libz.dylib 는 제거했다.
+         AddressBook 은 iOS 9 에서 deprecated 된 연락처 API 로 Google Sign-In 과 무관한데,
+         링크해두면 Apple 의 privacy manifest 심사에서 연락처 접근 사유를 요구받을 수 있다.
+         libz.dylib 는 Xcode 7 이후 .tbd 로 대체되어 존재하지 않는다(바로 아래 .tbd 가 정본). -->
     <framework src="CoreText.framework" weak="true" />
     <framework src="SafariServices.framework" weak="true" />
     <framework src="Security.framework" weak="true" />
     <framework src="SystemConfiguration.framework" weak="true" />
     <framework src="libz.tbd" weak="true" />
-    <framework src="libz.dylib" weak="true" />
 
     <!-- Google frameworks -->
     <preference name="GOOGLE_SIGN_IN_VERSION" default="~> 7.1.0"/>
@@ -121,9 +129,15 @@
       </pods>
     </podspec>
 
-    <!-- after_prepare hook to add GIDClientID -->
-    <!-- <hook type="after_prepare" src="hooks/ios/after_prepare.js" /> -->
-    <hook type="after_plugin_install" src="hooks/ios/prerequisites.js"/>
+    <!-- ⚠️ iOS 훅 두 개를 모두 제거했다(hooks/ios/ 디렉터리도 함께 삭제).
+         - after_prepare.js : 프로젝트 루트의 GoogleService-Info.plist(Firebase 설정)에서
+           CLIENT_ID 를 읽어 Info.plist 의 GIDClientID 에 써넣던 훅이다. Firebase 를 쓰지 않는
+           프로젝트에는 그 파일이 없어 deferral.reject 로 prepare 자체가 실패했다.
+           위의 <preference name="CLIENT_ID"> + <config-file parent="GIDClientID"> 선언이
+           같은 일을 Firebase 없이 처리하므로 대체가 끝났다.
+         - prerequisites.js : 위 훅이 쓰던 xcode / plist npm 패키지를 설치하려고
+           npm install 을 돌리던 훅이다. 쓰는 쪽이 사라져 목적이 없어졌고,
+           require('q') 가 cordova 12 에 번들되지 않아 설치가 깨질 위험만 남았다. -->
   </platform>
 
   <!-- browser -->
