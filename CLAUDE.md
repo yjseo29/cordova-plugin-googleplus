@@ -73,6 +73,23 @@ UTF-8 을 ANSI 로 읽고 써서 **한글 주석이 깨진다.** 파일 수정�
 
 ## 2. 지금 상태 (2026-08 기준)
 
+### v10.1.0 — 외부 revoke 복구 (`staleAccessToken` 옵션)
+
+사용자가 **계정 설정/Drive 에서 앱 권한을 외부에서 해제**하면 서버 grant 는 사라지지만
+GMS 로컬 캐시는 그걸 모른다(토큰이 만료 전이라 멀쩡해 보인다). 그 상태로 `authorize()` 는
+죽은 토큰을 계속 돌려줘서 401 → 재로그인 → 같은 토큰 → 401 에 갇힌다.
+(실기기에서 실제로 확인된 시나리오 — 에러 본문이 Drive API 의
+"Request had invalid authentication credentials..." 그대로 표면화된다)
+
+해법: 앱이 401 을 맞은 토큰을 `login({ staleAccessToken })` 으로 넘기면, 플러그인이
+`AuthorizationClient.clearToken(ClearTokenRequest)` 으로 캐시에서 지운 **뒤** 진행한다
+(네이티브에서 순차 실행 — 레이스 없음). 그러면 authorize 가 새로 민팅을 시도하고,
+grant 가 없으면 hasResolution → 동의 화면 → 복구. 옛 구현의 `invalidateAuthToken` 재시도와
+같은 의미론이다. 캐시에 없는 토큰이면 no-op 이라 언제 넘겨도 무해하다.
+
+앱 쪽 연결(daily-day/util_backup.js): `googleDriveClear` 가 지우기 전 토큰을
+`Keys.GOOGLE_DRIVE_STALE_TOKEN` 에 보관(메모리 전용) → 다음 `googleDriveLogin` 이 옵션으로 전달.
+
 ### v10.0.0 — Android 인증/인가 분리 (AuthorizationClient 전환)
 
 `GooglePlus.java` 를 전면 재작성했다. 구조는 소스 상단 클래스 주석에 있다. 요점:
@@ -285,4 +302,5 @@ cordova plugin add <이 플러그인 경로> --variable CLIENT_ID=... --variable
 | (Android) 로그인해도 계정 선택 화면이 안 뜬다 | 버그 아님 — v10 의 silent-first. 계정 전환은 로그아웃 먼저 → §2 |
 | (Android) `trySilentLogin` 성공인데 `accessToken` 이 null | 버그 아님 — 스코프 미승인 상태의 신원-만 성공. `grantedScopes` 로 판단 → §2, §3 |
 | (Android) 결과에 `expires` 가 없다 | v10 에서 제거됨(tokeninfo 검증 경로 삭제) → §3 |
+| (Android) 외부에서 권한 해제 후 "invalid authentication credentials" 401 반복 | GMS 토큰 캐시가 revoke 를 모름 — `staleAccessToken` 으로 clearToken → §2 (v10.1.0) |
 | (Android) 앱 재설치/업데이트 후 옛 코드가 도는 듯 | `platforms/` 의 사본과 `plugins/` fetch 캐시가 갱신 안 됨 — 플러그인 remove/add 재설치 필요 → §6 |

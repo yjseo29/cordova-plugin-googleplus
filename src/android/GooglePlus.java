@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.gms.auth.api.identity.AuthorizationRequest;
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.auth.api.identity.ClearTokenRequest;
 import com.google.android.gms.auth.api.identity.Identity;
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
@@ -84,6 +85,7 @@ public class GooglePlus extends CordovaPlugin {
     public static final String ARGUMENT_SCOPES = "scopes";
     public static final String ARGUMENT_OFFLINE_KEY = "offline";
     public static final String ARGUMENT_HOSTED_DOMAIN = "hostedDomain";
+    public static final String ARGUMENT_STALE_ACCESS_TOKEN = "staleAccessToken";
 
     public static final String TAG = "GooglePlugin";
 
@@ -210,11 +212,32 @@ public class GooglePlus extends CordovaPlugin {
 
         final GoogleSignInClient client = GoogleSignIn.getClient(cordova.getActivity(), buildSignInOptions(clientOptions));
 
-        // 조용한 로그인을 먼저 시도한다.
-        // 앱의 401 처리(토큰 만료 → 재로그인)가 이 경로를 타므로, 세션이 살아 있으면
-        // 계정 선택 화면 없이 토큰만 조용히 재발급된다. 세션이 없으면(로그아웃/최초/revoke 직후)
-        // 대화형 사인인 화면으로 넘어간다.
-        // 계정을 바꾸고 싶으면 앱의 로그아웃(signOut)을 거치면 된다 — 그러면 silent 가 실패해 화면이 뜬다.
+        // ⚠️ 죽은 토큰의 GMS 캐시 무효화 — 사용자가 계정 설정/Drive 에서 앱 권한을 "외부에서"
+        //    해제하면 서버의 grant 는 사라지지만 GMS 로컬 캐시는 그걸 모른다(토큰이 만료 전이라
+        //    멀쩡해 보인다). 그 상태로 authorize() 를 부르면 죽은 토큰을 그대로 다시 줘서
+        //    앱이 401 → 재로그인 → 또 같은 죽은 토큰 → 401 로 갇힌다.
+        //    앱이 401 을 맞은 토큰을 staleAccessToken 옵션으로 넘기면 clearToken 으로 캐시에서
+        //    지운 뒤 진행한다. 그러면 authorize 가 새로 민팅을 시도하고, grant 가 없으면
+        //    hasResolution → 동의 화면 → 복구된다. (옛 구현의 invalidateAuthToken 재시도와 같은 의미론)
+        //    캐시에 없는 토큰이면 no-op 이므로 실패해도 그냥 진행한다.
+        String staleToken = clientOptions != null ? clientOptions.optString(ARGUMENT_STALE_ACCESS_TOKEN, null) : null;
+        if (staleToken != null && !staleToken.isEmpty()) {
+            Identity.getAuthorizationClient(cordova.getActivity())
+                    .clearToken(ClearTokenRequest.builder().setToken(staleToken).build())
+                    .addOnCompleteListener(task -> startSignIn(client));
+        } else {
+            startSignIn(client);
+        }
+    }
+
+    /**
+     * 조용한 로그인을 먼저 시도한다.
+     * 앱의 401 처리(토큰 만료 → 재로그인)가 이 경로를 타므로, 세션이 살아 있으면
+     * 계정 선택 화면 없이 토큰만 조용히 재발급된다. 세션이 없으면(로그아웃/최초/revoke 직후)
+     * 대화형 사인인 화면으로 넘어간다.
+     * 계정을 바꾸고 싶으면 앱의 로그아웃(signOut)을 거치면 된다 — 그러면 silent 가 실패해 화면이 뜬다.
+     */
+    private void startSignIn(GoogleSignInClient client) {
         client.silentSignIn()
                 .addOnSuccessListener(account -> authorizeAccount(account))
                 .addOnFailureListener(e -> signInActivityLauncher.launch(client.getSignInIntent()));
