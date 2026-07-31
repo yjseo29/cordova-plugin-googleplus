@@ -56,6 +56,14 @@ Google 로그인 Cordova 플러그인. **실사용 목적은 하나 — daily-da
 
 할 수 있는 건 두 가지다: ①로그인 전에 설명 화면을 띄워 체크를 유도 ②거부 시 복구 경로 제공(§1-1).
 
+📌 **v10 분리 후 실측**: `drive.appdata` 는 구글 공식 분류로 **non-sensitive** 스코프라
+(Drive API 문서의 스코프 표 — 앱 자신의 숨김 폴더만 접근), 전용 인가 흐름에서는 구글이
+**동의 UI 자체를 생략하고 자동 승인**하는 것이 관찰됐다(Drive 연결해제 + 앱데이터 삭제 후
+재로그인 → 계정 선택만 뜨고 hasResolution=false 로 즉시 토큰 발급 → 백업 정상).
+동의 화면을 띄울지는 구글 서버가 결정한다 — hasResolution 이 false 면 우리가 띄울 방법도,
+띄울 이유도 없다. 예전 GSO 통합 흐름의 미체크 체크박스는 그 UI 가 추가 스코프를 일괄
+선택 항목으로 나열하는 정책이었을 뿐이다. 분리가 곧 해법이었던 셈.
+
 ### 1-3. 스코프는 "요청" 이지 "승인" 이 아니다
 
 `additionalScopes`(iOS) / `requestScopes`(Android) 는 요청일 뿐이다.
@@ -303,4 +311,5 @@ cordova plugin add <이 플러그인 경로> --variable CLIENT_ID=... --variable
 | (Android) `trySilentLogin` 성공인데 `accessToken` 이 null | 버그 아님 — 스코프 미승인 상태의 신원-만 성공. `grantedScopes` 로 판단 → §2, §3 |
 | (Android) 결과에 `expires` 가 없다 | v10 에서 제거됨(tokeninfo 검증 경로 삭제) → §3 |
 | (Android) 외부에서 권한 해제 후 "invalid authentication credentials" 401 반복 | GMS 토큰 캐시가 revoke 를 모름 — `staleAccessToken` 으로 clearToken → §2 (v10.1.0) |
+| (Android) revoke 후 재로그인인데 동의 화면 없이 그냥 된다 | 버그 아님 — `drive.appdata` 는 non-sensitive 라 인가 흐름이 무UI 자동 승인 → §1-2 |
 | (Android) 앱 재설치/업데이트 후 옛 코드가 도는 듯 | `platforms/` 의 사본과 `plugins/` fetch 캐시가 갱신 안 됨 — 플러그인 remove/add 재설치 필요 → §6 |
