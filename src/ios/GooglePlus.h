@@ -13,6 +13,7 @@
 - (void) login:(CDVInvokedUrlCommand*)command;
 - (void) logout:(CDVInvokedUrlCommand*)command;
 - (void) disconnect:(CDVInvokedUrlCommand*)command;
+- (void) isAvailable:(CDVInvokedUrlCommand*)command;
 - (void) isSignedIn:(CDVInvokedUrlCommand*)command;
 
 @end

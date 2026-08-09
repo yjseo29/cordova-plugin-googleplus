@@ -26,6 +26,21 @@ GooglePlus.prototype.trySilentLogin = function (options, successCallback, errorC
   }
 };
 
+/**
+ * isSignedIn 은 iOS 전용이다. 안드로이드 네이티브에는 해당 액션 자체가 없다
+ * (trySilentLogin 이 그 역할을 겸한다). 안드로이드에서 부르면 명시적으로 에러를 준다 —
+ * 액션 없는 exec 는 INVALID_ACTION 으로 조용히 실패해 원인을 찾기 어렵기 때문이다.
+ */
+GooglePlus.prototype.isSignedIn = function (successCallback, errorCallback) {
+  if (cordova.platformId === 'android') {
+    if (errorCallback) {
+      errorCallback("For iOS only");
+    }
+  } else {
+    cordova.exec(successCallback, errorCallback, "GooglePlus", "isSignedIn", []);
+  }
+};
+
 GooglePlus.prototype.logout = function (successCallback, errorCallback) {
   cordova.exec(successCallback, errorCallback, "GooglePlus", "logout", []);
 };

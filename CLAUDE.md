@@ -89,6 +89,45 @@ UTF-8 을 ANSI 로 읽고 써서 **한글 주석이 깨진다.** 파일 수정�
 
 ## 2. 지금 상태 (2026-08 기준)
 
+### v10.2.0 — iOS 를 Android v10 구조로 정렬 + GoogleSignIn 9.2.0 (§4 소화)
+
+**맥에서 빌드 검증까지 끝났다** — 시뮬레이터 Debug, x86_64+arm64, 플러그인 경고 0 건.
+7.1.0 상태의 053a797 도 먼저 단독으로 빌드 통과를 확인한 뒤 진행했다(회귀 원인 분리 목적).
+**실기기 정상 경로 검증 완료(2026-08-10)** — 로그인, 백업/복구 왕복 정상.
+남은 것은 복구 경로 시나리오(외부 revoke, 동의 거부 후 disconnect) — §4 참고.
+
+- **GoogleSignIn `~> 9.2`** (plugin.xml 기본값). 예상대로 플러그인 코드 변경은 0 이었고
+  pod 만 갈렸다: AppAuth 2.1.0 / GTMAppAuth 5.0.0 / AppCheckCore 11.3.1(신규) /
+  GoogleUtilities 8.1.2(유지). daily-day 의 다른 pod 과 충돌 없이 한 번에 해석됐다
+  (`--repo-update` 불필요했다).
+- **`login` 재작성 — Android v10 과 같은 인증/인가 분리.**
+  - 인증: `signIn...additionalScopes:nil` — 스코프를 끼워 넣지 않는다(신원만).
+  - 인가: `finishLoginWithUser:` 의 `addScopes:` 가 전담. `grantedScopes` 검증은 그대로.
+  - **silent-first**: `currentUser` → (`hasPreviousSignIn` 이면) `restorePreviousSignIn`
+    → `refreshTokensIfNeeded` 순으로 조용히 시도하고, 세션이 없을 때만 로그인 UI 를 띄운다.
+    앱의 401 재로그인 경로가 UI 없이 토큰 갱신만으로 끝난다. 계정 전환은 로그아웃 먼저(Android 와 동일 UX).
+  - **`refreshTokensIfNeeded` 실패 시 대화형 로그인으로 폴백** — 외부 revoke 로 refresh token 이
+    죽은 세션의 복구 경로다. Android v10.1.0 의 `staleAccessToken`(clearToken) 에 대응하는
+    API 가 iOS 에는 없어서, **그 옵션은 iOS 에서 무시되고** 이 폴백이 같은 역할을 한다.
+- **§4-C 일부 해소**: `isAvailable` iOS 구현 추가(항상 "true" — Android 와 같은 형태),
+  `isSignedIn` 을 JS 에 노출(iOS 전용, Android 에서는 명시적 에러). `isSignedIn` 은
+  재시작 후 `currentUser` 가 nil 이어도 맞게 답하도록 `hasPreviousSignIn` 을 함께 본다.
+- **cordova-ios 8 대응 — URL 콜백 경로 정리.** deprecated 경고가 나던
+  `CDVPluginHandleOpenURLWithAppSourceAndAnnotationNotification` 구독을 버리고
+  `CDVPluginHandleOpenURLNotification` 하나만 구독한다. `AppDelegate.h`/`objc/runtime.h`
+  import 도 제거(사용 심볼 0 개 — 옛 스위즐링 잔재. 전자는 8 에서 호환 shim, 9 에서 제거 예고).
+  ⚠️ 단순 경고 수리가 아니었다 — **8 의 scene 라이프사이클에서는 `CDVSceneDelegate` 가 옛 알림을
+  아예 게시하지 않는다**(`CDVAppDelegate` 만 게시). 즉 옛 구독은 scene 경로에서 handleURL 에
+  한 번도 도달하지 못했다. 새 알림은 cordova-ios 전 버전이 object 에 NSURL 을 실어 보내므로
+  (≤7 은 object 만, 8 은 userInfo 에 sourceApplication/annotation 추가) **7 이하와도 호환된다** —
+  이 플러그인은 URL 만 쓴다. GIDSignIn 의 `handleURL:` 도 URL 하나만 받는다
+  (sourceApplication 이 필요하던 건 GoogleSignIn 4.x 시절).
+  **검증**: 8.1.1 헤더(daily-day 실제 플랫폼) + GoogleSignIn 9.2.0 조합과 7.1.1 헤더
+  (npm 에서 받아 대조) 양쪽 모두 `clang -fsyntax-only -Wall` 진단 0 건.
+  7.1.1 의 CDVAppDelegate.m:84 가 object=url 로 게시하는 것도 소스로 확인.
+- 정리: `addScopes:` 완료 블록의 retain cycle 경고 해소(폴백을 `currentUser` 로),
+  package.json 의 `q` 의존성 제거(삭제된 iOS 훅 prerequisites.js 의 잔재).
+
 ### v10.1.0 — 외부 revoke 복구 (`staleAccessToken` 옵션)
 
 사용자가 **계정 설정/Drive 에서 앱 권한을 외부에서 해제**하면 서버 grant 는 사라지지만
@@ -173,11 +212,15 @@ deprecated 표시(다음 단계인 Credential Manager 권고 — §5).
 | `plugin.xml` 파싱 / 플랫폼별 해석 | ✅ cordova-common `PluginInfo` 로 확인 |
 | ObjC 괄호 균형 / `.h`↔`.m` 선언 대조 | ✅ |
 | GoogleSignIn 7.1.0 API 시그니처 | ✅ 실제 헤더로 대조 |
+| GoogleSignIn 9.2.0 API / pod 해석 | ✅ Podfile.lock + 빌드로 확인 (v10.2.0) |
 | `www/GooglePlus.js` 구문 | ✅ |
-| **Xcode 빌드** | ❌ **미검증** |
-| **실기기 동작** | ❌ **미검증** |
+| **Xcode 빌드** | ✅ 시뮬레이터 Debug 통과 — 7.1.0(053a797 단독), 9.2.0(v10.2.0) 모두 (cordova-ios 7 시절 플랫폼) |
+| cordova-ios 8 호환 | ✅ 8.1.1 헤더 fsyntax-only 진단 0 + daily-day 전체 앱 빌드(App 타깃) 실컴파일 + 실기기 로그인/백업 확인. 함께 고친 다른 플러그인: admob/consent(yjseo29/admob-plus 포크, alpha.6/alpha.1 릴리스됨), datetimepicker(yjseo29 포크 수정), file-transfer(최신 버전이 자체 해결), advanced-http(로컬 패치만 — 유일하게 남은 비영구 패치) |
+| cordova-ios ≤7 하위 호환 | ✅ 7.1.1 헤더로 fsyntax-only 진단 0 + object=url 게시 소스 확인 |
+| **실기기 동작 (정상 경로)** | ✅ 로그인 + 백업/복구 왕복 정상 (2026-08-10, cordova-ios 8 플랫폼). 로그인이 되므로 `handleURL:` 회귀 우려도 해소 |
+| **실기기 동작 (복구 경로)** | ❌ **미검증** — 외부 revoke 폴백, 동의 거부 → disconnect 복구 → §4 |
 
-`053a797` 은 Windows 에서 작성됐다. **맥에서 빌드가 처음이다.**
+`053a797` 은 Windows 에서 작성됐고, v10.2.0 작업에서 맥 빌드까지 확인했다.
 
 ---
 
@@ -201,87 +244,40 @@ deprecated 표시(다음 단계인 Credential Manager 권고 — §5).
 
 ---
 
-## 4. 맥에서 할 iOS 작업
+## 4. iOS 작업 — 구현·빌드·정상 경로 실기기 검증 완료(v10.2.0)
 
-### A. 🔴 1순위 — `053a797` 빌드 & 회귀 확인
+§4 의 A(빌드)·B(9.2.0)·B-2(v10 구조)·C 일부(isAvailable/isSignedIn)는 **v10.2.0 에서 끝났다**(§2).
+GoogleSignIn 9.x 마이그레이션은 예상대로 API 변경 0, pod 교체만으로 통과했다
+(비교 근거는 plugin.xml 의 주석과 §2 v10.2.0 기록으로 옮겼다).
+**실기기(2026-08-10)**: 로그인 + 백업/복구 왕복 정상 — 아래 1·6 은 해소, 남은 것은 복구 경로다.
 
-**빌드부터 통과시킬 것.** 위험도 순으로 확인 항목이 정해져 있다.
+### 실기기 검증 시나리오 (위험도 순)
 
-1. **`handleURL:` 회귀** ← 이번 변경 중 가장 위험하다
-   인증 콜백 경로를 건드렸다. 로그인이 아예 안 되면 여기부터 의심할 것.
-   되돌리려면 조건에 `&& NO` 를 넣지 말고 `handleOpenURLWithAppSourceAndAnnotation:` 의
-   `if` 블록 전체를 주석 처리하면 이전 동작과 같아진다.
-2. **`addScopes:` 흐름** — 동의 화면에서 체크를 **일부러 해제**하고 로그인 → 추가 동의 화면이 뜨는지
-3. **`disconnect` 복구** — 위에서 거부 → 앱 **완전 종료 후 재실행** → 백업 시도 →
-   동의 화면 체크박스가 **다시 뜨는지**. 이게 `restorePreviousSignIn` 추가의 목적이다
-4. 정상 백업/복구 왕복
+1. ✅ **`handleURL:` 회귀** — 실기기 로그인 정상으로 해소(2026-08-10).
+   만약 재발하면: SDK 자체 처리(ASWebAuthenticationSession)에만 맡겨 이전 동작으로 되돌리려면
+   `handleOpenURL:` 안의 `if` 블록 전체를 주석 처리하면 된다.
+   (v10.2.0 에서 구독이 `CDVPluginHandleOpenURLNotification` 하나로 바뀌었다 —
+   cordova-ios 8 의 scene 경로에서는 옛 알림이 아예 안 오기 때문. §2)
+2. ❌ **외부 revoke 복구 (B-2 ①)** — 계정 설정/Drive 에서 앱 권한을 외부에서 해제 → 재로그인 →
+   죽은 세션에 갇히지 않고 `refreshTokensIfNeeded` 실패 → **대화형 로그인 폴백**이 도는지.
+   Android 에서 실측된 v10.1.0 시나리오의 iOS 판이다. iOS 엔 clearToken 이 없어 이 폴백이 유일한 복구 경로다.
+3. ❔ **silent-first (B-2 ②)** — 토큰 만료(약 1 시간) 후 재로그인이 **UI 없이** 조용히 되는지.
+   (로그인·백업이 정상이므로 동작은 하지만, 만료 후 재로그인이 "조용했는지" 는 따로 관찰 안 됨)
+4. ❔ **인가 전용 동의 흐름** — 한 번도 승인 안 한 계정으로 로그인 → 스코프 동의가 로그인 화면의
+   체크박스가 아니라 **별도 화면**(`addScopes:`)으로 뜨는지. 거부하면 `missingScopes` 에러가 오는지.
+   ⚠️ `drive.appdata` 는 non-sensitive 라 Android 처럼 무UI 자동 승인될 수도 있다(§1-2) — 그것도 정상이다.
+5. ❌ **`disconnect` 복구** — 동의 거부 → 앱 **완전 종료 후 재실행** → 백업 시도 → 동의가
+   **다시 뜨는지**. 이게 `restorePreviousSignIn` 을 disconnect 앞에 태운 목적이다.
+6. ✅ 정상 백업/복구 왕복 — 실기기 확인(2026-08-10).
 
-### B. 🟡 2순위 — GoogleSignIn 7.1.0 → 9.x 마이그레이션
+### C. 🟢 남은 비대칭/미구현 (급하지 않음)
 
-**좋은 소식: 코드 재작성은 거의 필요 없을 가능성이 높다.**
-7.1.0 과 9.2.0 의 public 헤더를 대조한 결과, **플러그인이 쓰는 API 가 전부 그대로 있다**:
-
-```
-signInWithPresentingViewController:hint:additionalScopes:completion:
-handleURL: / signOut / disconnectWithCompletion: / currentUser
-hasPreviousSignIn / restorePreviousSignInWithCompletion:
-addScopes:presentingViewController:completion: / grantedScopes
-GIDToken.expirationDate / .tokenString / GIDGoogleUser.userID
-GIDProfileData.imageURLWithDimension:
-```
-
-9.x 는 오버로드를 **추가**했을 뿐 위 시그니처를 지우지 않았다.
-
-⚠️ **진짜 위험은 API 가 아니라 CocoaPods 의존성이다.**
-
-| | 7.1.0 | 9.2.0 |
-|---|---|---|
-| `ios.deployment_target` | 10.0 | **12.0** |
-| `AppAuth` | `>= 1.7.3, < 2.0` | **`~> 2.1`** (메이저) |
-| `GTMAppAuth` | `>= 4.1.1, < 5.0` | **`~> 5.0`** (메이저) |
-| `GTMSessionFetcher/Core` | `~> 3.3` | `~> 3.3` (동일) |
-| `AppCheckCore` | — | **`~> 11.0`** (신규) |
-
-- daily-day 의 `deployment-target` 은 **15.0** 이라 12.0 요구는 충족한다
-- daily-day 플러그인 중 **AppAuth / GTMAppAuth 계열을 쓰는 건 이 플러그인뿐**이다(확인함).
-  나머지 pod 은 `Google-Mobile-Ads-SDK`, `GoogleMobileAdsMediationFacebook`,
-  `GoogleUserMessagingPlatform`, `GoogleUtilities` → **직접 충돌 가능성은 낮다**
-- 막히면 `Podfile.lock` 을 지우고 `pod install --repo-update` 로 재해석해볼 것
-
-작업 순서: `plugin.xml` 의 `GOOGLE_SIGN_IN_VERSION` 기본값을 `~> 9.2` 로 올리고
-→ 플러그인 재설치 → `pod install` → 빌드 → §4-A 의 4 개 시나리오 재확인.
-
-⚠️ `GOOGLE_UTILITIES_VERSION` 은 `~> 8.0` 그대로 둘 것. 9.2.0 도 `GoogleUtilities 8.x` 계열과 맞는다.
-
-### B-2. 🟡 iOS 를 Android v10 구조로 맞추기 (B 와 같이 하면 효율적)
-
-Android v10 이 인증/인가를 분리해 미체크 체크박스 문제를 구조적으로 없앴고(§1-2),
-외부 revoke 후에도 동의 화면 없이 복구되는 것까지 실기기로 확인됐다.
-iOS 의 현재 구현(053a797)은 **절반만 분리된 상태**다 — `signIn` 의 `additionalScopes:` 로
-스코프를 끼워 넣는 통합 흐름이고, 부족할 때만 `addScopes:` 를 태운다.
-
-| Android v10 | iOS 대응 (할 일) |
-|---|---|
-| 사인인 GSO 에 스코프 없음 (신원만) | `signIn...additionalScopes:` 에 **nil** — 스코프를 끼워 넣지 않기 |
-| `AuthorizationClient.authorize()` | `user.addScopes:` 가 인가 전용 흐름 — 스코프는 전부 여기서 |
-| silentSignIn 실패 시에만 인터랙티브 | `hasPreviousSignIn` → `restorePreviousSignInWithCompletion:` + `refreshTokensIfNeededWithCompletion:` — 세션이 없을 때만 signIn UI |
-| `grantedScopes` 검증 | ✅ 이미 구현됨 (053a797) |
-| `clearToken(staleAccessToken)` | **대응 API 없음** — login 옵션의 `staleAccessToken` 은 iOS 에서 무시된다. `refreshTokensIfNeeded` 가 외부 revoke 를 반영하는지 확인 필요 |
-
-⚠️ Android 에서 실제로 겪은 두 시나리오를 iOS 에서도 반드시 테스트할 것:
-① 외부(계정 설정/Drive)에서 권한 해제 후 재로그인이 죽은 토큰에 갇히지 않는지 (§2 v10.1.0)
-② 토큰 만료 후 재로그인이 UI 없이 조용히 되는지 (silent-first)
-
-### C. 🟢 3순위 — 남은 비대칭/미구현
-
-- **`isAvailable` 이 iOS 에 없다.** `www/GooglePlus.js` 는 노출하는데 `GooglePlus.m` 에 구현이 없다
-  (Android 만 `ACTION_IS_AVAILABLE` 처리). 앱은 안 쓰지만 부르면 실패한다
-- **`isSignedIn` 은 반대다.** `GooglePlus.m` 에 구현이 있는데 JS 에 노출이 없어 호출 불가
 - **`webClientId` / `offline` / `hostedDomain` 을 iOS 가 안 읽는다.** Android 만 처리한다.
-  `serverAuthCode` 가 iOS 결과에 없는 이유이기도 하다. 지금 쓰지 않으니 급하지 않다
-- **토큰 갱신 API 가 없다.** `accessToken` 은 약 1 시간 만료인데 앱은 401 을 맞고 재로그인한다.
-  `refreshTokensIfNeededWithCompletion:` 을 노출하면 무음 갱신이 가능하다.
-  `expires` 를 결과에 넣어둔 건 이걸 위한 사전 작업이다
+  `serverAuthCode` 가 iOS 결과에 없는 이유이기도 하다. 앱이 안 쓰니 보류.
+- **토큰 갱신 API 의 별도 노출은 없다.** 다만 v10.2.0 의 silent-first 가 내부에서
+  `refreshTokensIfNeededWithCompletion:` 을 쓰므로, 앱이 401 후 `login` 을 다시 부르면
+  사실상 무음 갱신으로 동작한다. 전용 refresh 액션이 필요해지면 그때 노출하면 된다
+  (`expires` 필드는 그걸 위한 사전 작업).
 
 ---
 
@@ -307,8 +303,8 @@ v10.0.0 에서 대부분 끝났다(§2). `GoogleApiClient`/`blockingConnect` 제
 ## 6. 빌드 · 반영
 
 ```bash
-# 앱 저장소(daily-day/cordova)에서
-cordova plugin remove cordova-plugin-googleplus
+# 앱 저장소(daily-day/cordova)에서 — remove 에도 변수가 필요하다(아래 ⚠️ 참고)
+cordova plugin remove cordova-plugin-googleplus --variable CLIENT_ID=... --variable REVERSED_CLIENT_ID=...
 cordova plugin add <이 플러그인 경로> --variable CLIENT_ID=... --variable REVERSED_CLIENT_ID=...
 ```
 
@@ -317,6 +313,26 @@ cordova plugin add <이 플러그인 경로> --variable CLIENT_ID=... --variable
 - ⚠️ 맥에서 `LANG` 미설정이면 `pod install` 이 인코딩 에러로 죽는다 →
   `LANG=en_US.UTF-8 cordova prepare ios`
 - ⚠️ `plugin.xml`·네이티브·`www/` 를 고치면 **재설치해야 앱에 반영된다**
+- ⚠️ **`plugin remove` 도 `--variable CLIENT_ID=... --variable REVERSED_CLIENT_ID=...` 를 요구한다.**
+  plugin.xml 의 잘못이 아니다 — default 없는 `<preference>` 는 "설치 시 필수 변수" 라는 표준 선언이고,
+  cordova 12 의 add 는 변수를 **package.json(`cordova.plugins`)에만** 저장하는데
+  remove 는 저장된 변수를 **config.xml 의 `<plugin><variable>` 에서만** 읽는다
+  (cordova-lib 의 쓰기/읽기 불일치 — `cordova/plugin/util.js mergeVariables` 는 `cfg.getPlugin` 만 본다.
+  플랫폼 스코프 preference 라 최종적으로는 `plugman/variable-merge.js` 가 던진다).
+  daily-day 의 config.xml 에 `<plugin>` 항목을 변수와 함께 넣어두면 변수 없는 remove 도 되지만,
+  add 가 다시 써주지 않으므로 유지 관리 부담만 는다 — 그냥 §6 명령대로 변수를 붙이는 게 낫다.
+  `default=""` 를 주는 "해결"은 금지 — 설치 시 강제가 사라져 빈 GIDClientID 로 조용히 설치된다.
+- ⚠️ **cordova-ios 8 + 위젯 타깃 상태에서의 재설치 함정 (실제로 겪음).** cordova 의
+  `addSourceFile` 은 타깃을 지정하지 않아, pbxproj **파일에서 먼저 나오는** 'Sources' phase 에
+  소스가 들어간다. daily-day 의 iOS 플랫폼에는 위젯 익스텐션 타깃
+  (DailyDayWidgetExtensionExtension)이 있고 그쪽 phase 가 App 보다 앞에 있어서,
+  위젯 타깃이 존재하는 상태에서 플러그인을 재설치하면 `GooglePlus.m` 이 **위젯 타깃으로**
+  들어가 `'Cordova/CDVPlugin.h' file not found` 로 빌드가 깨진다.
+  (플랫폼을 처음 추가할 때는 위젯 타깃이 아직 없어서 — 위젯 타깃은 이후 훅/수동으로 생성 —
+  플러그인들이 App 타깃에 정상 설치된다. 그래서 "재설치할 때만" 터진다.)
+  증상이 나오면 `App.xcodeproj/project.pbxproj` 에서 `GooglePlus.m in Sources` build file 참조를
+  위젯 타깃의 Sources phase 에서 App 타깃의 Sources phase 로 옮기면 된다.
+  근본 원인은 daily-day 쪽 위젯 타깃 생성 순서/cordova-node-xcode 의 한계라 이 저장소 밖의 일이다.
 
 ---
 
@@ -333,10 +349,16 @@ cordova plugin add <이 플러그인 경로> --variable CLIENT_ID=... --variable
 | 인자 없이 `login()` 호출 시 크래시 | `command.arguments[0]` 무방비 → §2 에서 수정됨 |
 | cordova-android 6.x 에서 컴파일 실패 | 코드가 androidx `ActivityResultLauncher` 사용. `engines` 하한 10 → §2 |
 | `trySilentLogin` 에서 `device is not defined` | 예전 `device.platform` 의존. `cordova.platformId` 로 교체됨 → §2 |
-| 로그인 창이 안 뜨거나 콜백이 안 옴 (iOS) | `handleURL:` 변경 회귀 의심 → §4-A |
+| 로그인 창이 안 뜨거나 콜백이 안 옴 (iOS) | `handleURL:` 변경 회귀 의심 → §4 |
+| (iOS) 로그인해도 계정 선택 화면이 안 뜬다 | 버그 아님 — v10.2.0 의 silent-first. 계정 전환은 로그아웃 먼저 → §2 |
+| (iOS) `staleAccessToken` 옵션이 효과가 없다 | 대응 API 없음 — 무시된다. 대신 refresh 실패 시 대화형 폴백이 같은 복구를 한다 → §2 (v10.2.0) |
+| (iOS) `CDVPluginHandleOpenURLWithAppSourceAndAnnotationNotification is deprecated` 경고 | v10.2.0 에서 해결 — `CDVPluginHandleOpenURLNotification` 단일 구독으로 교체. cordova-ios 8 scene 경로에서는 옛 알림이 아예 게시되지 않았다(경고보다 심각한 문제였다) → §2 |
+| (iOS) 플러그인이 `AppDelegate.h` 를 import 해서 cordova-ios 9 대비 경고 | v10.2.0 에서 import 제거 — 쓰는 심볼이 없었다 → §2 |
 | (Android) 로그인해도 계정 선택 화면이 안 뜬다 | 버그 아님 — v10 의 silent-first. 계정 전환은 로그아웃 먼저 → §2 |
 | (Android) `trySilentLogin` 성공인데 `accessToken` 이 null | 버그 아님 — 스코프 미승인 상태의 신원-만 성공. `grantedScopes` 로 판단 → §2, §3 |
 | (Android) 결과에 `expires` 가 없다 | v10 에서 제거됨(tokeninfo 검증 경로 삭제) → §3 |
 | (Android) 외부에서 권한 해제 후 "invalid authentication credentials" 401 반복 | GMS 토큰 캐시가 revoke 를 모름 — `staleAccessToken` 으로 clearToken → §2 (v10.1.0) |
 | (Android) revoke 후 재로그인인데 동의 화면 없이 그냥 된다 | 버그 아님 — `drive.appdata` 는 non-sensitive 라 인가 흐름이 무UI 자동 승인 → §1-2 |
 | (Android) 앱 재설치/업데이트 후 옛 코드가 도는 듯 | `platforms/` 의 사본과 `plugins/` fetch 캐시가 갱신 안 됨 — 플러그인 remove/add 재설치 필요 → §6 |
+| `plugin remove` 가 `Variable(s) missing: REVERSED_CLIENT_ID, CLIENT_ID` 로 실패 | plugin.xml 문제 아님 — cordova 12 가 변수를 package.json 에만 저장하고 remove 는 config.xml 만 읽는 불일치. remove 에도 `--variable` 을 붙일 것 → §6 |
+| (iOS) 재설치 후 위젯 익스텐션 타깃에서 `'Cordova/CDVPlugin.h' file not found` | 위젯 타깃이 있는 상태의 재설치는 플러그인 소스가 위젯 타깃 Sources phase 로 들어간다 — pbxproj 에서 App 타깃으로 옮길 것 → §6 |
